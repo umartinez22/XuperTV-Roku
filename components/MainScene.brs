@@ -2,6 +2,7 @@ sub init()
     m.menu = m.top.findNode("menu")
     m.categories = m.top.findNode("categories")
     m.channelsList = m.top.findNode("channels")
+    m.liveCategoryTitle = m.top.findNode("liveCategoryTitle")
     m.grid = m.top.findNode("grid")
     m.episodes = m.top.findNode("episodes")
     m.status = m.top.findNode("status")
@@ -38,6 +39,7 @@ sub init()
     m.livePageSize = 60
     m.livePageLimit = 5
     m.liveCategoryId = invalid
+    m.liveCategoryName = ""
     m.liveChannels = []
     m.currentChannelIndex = -1
     m.liveResolveSequence = 0
@@ -135,6 +137,7 @@ sub loadSection(index as integer)
     m.episodes.visible = false
     m.categories.visible = false
     m.channelsList.visible = false
+    m.liveCategoryTitle.visible = false
     m.grid.visible = true
     m.liveBrowsing = false
     if s.kind = "home" then
@@ -157,6 +160,7 @@ end sub
 sub showItems(items as object)
     m.categories.visible = false
     m.channelsList.visible = false
+    m.liveCategoryTitle.visible = false
     m.grid.visible = true
     m.items = items
     root = CreateObject("roSGNode", "ContentNode")
@@ -186,6 +190,7 @@ sub showLiveCategories(categories as object)
     m.categories.content = root
     m.categories.visible = true
     m.channelsList.visible = false
+    m.liveCategoryTitle.visible = false
     m.grid.visible = false
     m.categories.setFocus(true)
 end sub
@@ -194,6 +199,7 @@ sub onCategorySelected()
     idx = m.categories.itemSelected
     if idx < 0 or idx >= m.liveCategories.count() then return
     category = m.liveCategories[idx]
+    m.liveCategoryName = category.name
     m.livePaginationSequence = m.livePaginationSequence + 1
     m.livePaginationTag = "liveChannels_" + m.livePaginationSequence.toStr()
     m.liveCategoryId = category.id
@@ -233,6 +239,8 @@ sub showChannels(channels as object)
     m.channelsList.content = root
     m.categories.visible = false
     m.grid.visible = false
+    m.liveCategoryTitle.text = m.liveCategoryName
+    m.liveCategoryTitle.visible = true
     m.channelsList.visible = true
     m.channelsList.setFocus(true)
 end sub
@@ -285,6 +293,7 @@ sub showEpisodes(r as object)
     m.episodes.content = root
     m.grid.visible = false
     m.channelsList.visible = false
+    m.liveCategoryTitle.visible = false
     m.episodes.visible = true
     m.episodes.setFocus(true)
 end sub
@@ -417,6 +426,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
             return true
         else if m.channelsList.hasFocus() then
             m.channelsList.visible = false
+            m.liveCategoryTitle.visible = false
             m.grid.visible = false
             m.categories.visible = true
             m.categories.setFocus(true)
