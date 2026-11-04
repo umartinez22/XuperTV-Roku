@@ -5,7 +5,9 @@
         <Rectangle id="bg" width="1920" height="1080" color="0x0B0B10FF" />
         <Label id="logo" text="Xuper TV" translation="[60,40]" width="600" height="60" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
         <LabelList id="menu" translation="[60,150]" itemSize="[340,64]" numRows="6" focusBitmapUri="" color="0xCCCCCCFF" focusedColor="0xFFFFFFFF" />
+        <LabelList id="categories" translation="[460,130]" itemSize="[1360,60]" numRows="14" visible="false" />
         <PosterGrid id="grid" translation="[460,130]" basePosterSize="[220,330]" itemSpacing="[20,24]" numColumns="6" numRows="3" caption1NumLines="1" />
+        <LabelList id="channels" translation="[460,130]" itemSize="[1360,60]" numRows="14" visible="false" />
         <LabelList id="episodes" translation="[460,130]" itemSize="[1360,60]" numRows="14" visible="false" />
         <Label id="status" translation="[460,1010]" width="1400" height="40" color="0xAAAAAAFF" />
         <Video id="video" translation="[0,0]" width="1920" height="1080" visible="false" />

@@ -39,7 +39,7 @@ Al abrir el canal pide la dirección del servidor: `http://IP_DEL_PC:8910`. Se g
 
 ## Qué tiene
 
-Películas, series con episodios, destacado, canales en vivo y buscador. Los videos `.ts` se piden al servidor como HLS virtual, y el "modo fluido" (`ffmpeg`) convierte a MP4.
+Películas, series con episodios, destacado, canales en vivo en una lista organizada por categorías (carga hasta cinco páginas por categoría; cambia de canal con arriba/abajo durante la reproducción) y buscador. Los videos `.ts` se piden al servidor como HLS virtual, y el "modo fluido" (`ffmpeg`) convierte a MP4.
 
 ## Estado
 

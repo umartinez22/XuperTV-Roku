@@ -1,5 +1,7 @@
 sub init()
     m.menu = m.top.findNode("menu")
+    m.categories = m.top.findNode("categories")
+    m.channelsList = m.top.findNode("channels")
     m.grid = m.top.findNode("grid")
     m.episodes = m.top.findNode("episodes")
     m.status = m.top.findNode("status")
@@ -21,11 +23,25 @@ sub init()
     m.menu.content = root
 
     m.menu.observeField("itemSelected", "onMenuSelected")
+    m.categories.observeField("itemSelected", "onCategorySelected")
+    m.channelsList.observeField("itemSelected", "onChannelSelected")
     m.grid.observeField("itemSelected", "onGridSelected")
     m.episodes.observeField("itemSelected", "onEpisodeSelected")
     m.video.observeField("state", "onVideoState")
 
     m.items = []
+    m.liveCategories = []
+    m.liveBrowsing = false
+    m.livePaginationSequence = 0
+    m.livePaginationTag = ""
+    m.livePageNum = 0
+    m.livePageSize = 60
+    m.livePageLimit = 5
+    m.liveCategoryId = invalid
+    m.liveChannels = []
+    m.currentChannelIndex = -1
+    m.liveResolveSequence = 0
+    m.liveResolveTag = ""
     m.episodeItems = []
     m.currentSeries = ""
     m.server = RegRead("server")
@@ -68,22 +84,44 @@ end sub
 sub onApiResult(event as object)
     r = event.getData()
     if r = invalid then return
+    tag = r.tag
+
+    liveResolve = isLiveResolveTag(tag)
+    livePagination = isLivePaginationTag(tag)
+
+    if liveResolve and tag <> m.liveResolveTag then return
+    if livePagination and tag <> m.livePaginationTag then return
+    
     m.status.text = ""
+
     if r.returnValue = false
+        if livePagination and m.liveChannels.count() > 0 then showChannels(m.liveChannels)
         m.status.text = "Error: " + r.errorText.toStr()
         return
     end if
-    tag = r.tag
+
     if tag = "home" or tag = "search" then
         showItems(r.items)
-    else if tag = "live" then
-        showChannels(r.channels)
+    else if tag = "liveCategories" then
+        showLiveCategories(r.categories)
+    else if livePagination then
+        appendLiveChannelsPage(r.channels)
     else if tag = "detail" then
         showEpisodes(r)
+    else if liveResolve then
+        playResolved(r)
     else if tag = "resolve" then
         playResolved(r)
     end if
 end sub
+
+function isLiveResolveTag(tag as dynamic) as boolean
+    return Instr(1, tag, "liveResolve_") = 1
+end function
+
+function isLivePaginationTag(tag as dynamic) as boolean
+    return Instr(1, tag, "liveChannels_") = 1
+end function
 
 ' ---------- menú ----------
 sub onMenuSelected()
@@ -92,12 +130,22 @@ end sub
 
 sub loadSection(index as integer)
     s = m.sections[index]
+    m.liveResolveTag = ""
+    m.livePaginationTag = ""
     m.episodes.visible = false
+    m.categories.visible = false
+    m.channelsList.visible = false
     m.grid.visible = true
+    m.liveBrowsing = false
     if s.kind = "home" then
         api("home", { root: s.root }, "home")
     else if s.kind = "live" then
-        api("liveChannels", { pageNum: 1, pageSize: 200 }, "live")
+        m.liveBrowsing = true
+        m.categories.visible = true
+        m.grid.visible = false
+        m.channelsList.visible = false
+        m.categories.setFocus(true)
+        api("liveCategories", {}, "liveCategories")
     else if s.kind = "search" then
         showKeyboard("search", "Buscar", "Título de película o serie", "")
     else if s.kind = "server" then
@@ -107,6 +155,9 @@ end sub
 
 ' ---------- contenido ----------
 sub showItems(items as object)
+    m.categories.visible = false
+    m.channelsList.visible = false
+    m.grid.visible = true
     m.items = items
     root = CreateObject("roSGNode", "ContentNode")
     if items <> invalid
@@ -123,21 +174,73 @@ sub showItems(items as object)
     m.grid.setFocus(true)
 end sub
 
+sub showLiveCategories(categories as object)
+    m.liveCategories = categories
+    root = CreateObject("roSGNode", "ContentNode")
+    if categories <> invalid
+        for each category in categories
+            n = root.CreateChild("ContentNode")
+            n.title = category.name
+        end for
+    end if
+    m.categories.content = root
+    m.categories.visible = true
+    m.channelsList.visible = false
+    m.grid.visible = false
+    m.categories.setFocus(true)
+end sub
+
+sub onCategorySelected()
+    idx = m.categories.itemSelected
+    if idx < 0 or idx >= m.liveCategories.count() then return
+    category = m.liveCategories[idx]
+    m.livePaginationSequence = m.livePaginationSequence + 1
+    m.livePaginationTag = "liveChannels_" + m.livePaginationSequence.toStr()
+    m.liveCategoryId = category.id
+    m.livePageNum = 1
+    m.liveChannels = []
+    api("liveChannels", { columnId: m.liveCategoryId, pageNum: m.livePageNum, pageSize: m.livePageSize }, m.livePaginationTag)
+end sub
+
+sub appendLiveChannelsPage(channels as object)
+    if channels <> invalid
+        for each channel in channels
+            m.liveChannels.push(channel)
+        end for
+    end if
+
+    if m.livePageNum < m.livePageLimit
+        m.livePageNum = m.livePageNum + 1
+        api("liveChannels", { columnId: m.liveCategoryId, pageNum: m.livePageNum, pageSize: m.livePageSize }, m.livePaginationTag)
+    else
+        showChannels(m.liveChannels)
+    end if
+end sub
+
 sub showChannels(channels as object)
     m.items = []
+    m.currentChannelIndex = -1
     root = CreateObject("roSGNode", "ContentNode")
     if channels <> invalid
+        channelNumber = 1
         for each ch in channels
             m.items.push({ kind: "canal", channelCode: ch.channelCode, title: ch.name })
             n = root.CreateChild("ContentNode")
-            n.title = ch.name
-            n.shortDescriptionLine1 = ch.name
-            n.HDPosterUrl = ch.logo
-            n.SDPosterUrl = ch.logo
+            n.title = channelNumber.toStr() + ". " + ch.name
+            channelNumber = channelNumber + 1
         end for
     end if
-    m.grid.content = root
-    m.grid.setFocus(true)
+    m.channelsList.content = root
+    m.categories.visible = false
+    m.grid.visible = false
+    m.channelsList.visible = true
+    m.channelsList.setFocus(true)
+end sub
+
+sub onChannelSelected()
+    idx = m.channelsList.itemSelected
+    if idx < 0 or idx >= m.items.count() then return
+    playLiveChannel(idx)
 end sub
 
 sub onGridSelected()
@@ -145,9 +248,7 @@ sub onGridSelected()
     if idx < 0 or idx >= m.items.count() then return
     it = m.items[idx]
     if it.kind = "canal" then
-        m.playTitle = it.title
-        m.playLive = true
-        api("resolveLive", { channelCode: it.channelCode }, "resolve")
+        playLiveChannel(idx)
     else if it.type = "teleplay" or it.kind = "serie" then
         m.currentSeries = it.id
         m.seriesTitle = it.title
@@ -157,6 +258,19 @@ sub onGridSelected()
         m.playLive = false
         api("resolveSmooth", { contentId: it.id }, "resolve")
     end if
+end sub
+
+sub playLiveChannel(index as integer)
+    if index < 0 or index >= m.items.count() then return
+    channel = m.items[index]
+    if channel.kind <> "canal" then return
+
+    m.currentChannelIndex = index
+    m.playTitle = channel.title
+    m.playLive = true
+    m.liveResolveSequence = m.liveResolveSequence + 1
+    m.liveResolveTag = "liveResolve_" + m.liveResolveSequence.toStr()
+    api("resolveLive", { channelCode: channel.channelCode }, m.liveResolveTag)
 end sub
 
 sub showEpisodes(r as object)
@@ -170,6 +284,7 @@ sub showEpisodes(r as object)
     end if
     m.episodes.content = root
     m.grid.visible = false
+    m.channelsList.visible = false
     m.episodes.visible = true
     m.episodes.setFocus(true)
 end sub
@@ -202,7 +317,7 @@ sub playResolved(r as object)
         url = Left(url, Instr(1, url, "stream.ts") - 1) + "stream.m3u8"
         fmt = "hls"
     end if
-
+    
     c = CreateObject("roSGNode", "ContentNode")
     c.url = url
     c.title = m.playTitle
@@ -227,9 +342,12 @@ end sub
 sub stopVideo()
     m.video.control = "stop"
     m.video.visible = false
+    m.liveResolveTag = ""
     api("abortMedia", {}, "abort")
     if m.episodes.visible then
         m.episodes.setFocus(true)
+    else if m.channelsList.visible then
+        m.channelsList.setFocus(true)
     else
         m.grid.setFocus(true)
     end if
@@ -268,6 +386,20 @@ end sub
 ' ---------- mando ----------
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    if m.video.visible and m.playLive and (key = "up" or key = "down") then
+        nextChannelIndex = m.currentChannelIndex
+        if key = "up" then
+            nextChannelIndex = nextChannelIndex - 1
+        else
+            nextChannelIndex = nextChannelIndex + 1
+        end if
+        if nextChannelIndex < 0 or nextChannelIndex >= m.items.count() then
+            m.status.text = "No hay más canales"
+        else
+            playLiveChannel(nextChannelIndex)
+        end if
+        return true
+    end if
     if key = "back" then
         if m.video.visible then
             stopVideo()
@@ -277,15 +409,38 @@ function onKeyEvent(key as string, press as boolean) as boolean
             m.grid.visible = true
             m.grid.setFocus(true)
             return true
+        else if m.categories.hasFocus() then
+            m.categories.visible = false
+            m.grid.visible = true
+            m.liveBrowsing = false
+            m.menu.setFocus(true)
+            return true
+        else if m.channelsList.hasFocus() then
+            m.channelsList.visible = false
+            m.grid.visible = false
+            m.categories.visible = true
+            m.categories.setFocus(true)
+            return true
+        else if m.grid.hasFocus() and m.liveBrowsing then
+            m.grid.visible = false
+            m.categories.visible = true
+            m.categories.setFocus(true)
+            return true
         else if m.grid.hasFocus() then
             m.menu.setFocus(true)
             return true
         end if
-    else if key = "left" and m.grid.hasFocus() then
+    else if key = "left" and (m.grid.hasFocus() or m.channelsList.hasFocus() or m.categories.hasFocus()) then
         m.menu.setFocus(true)
         return true
     else if key = "right" and m.menu.hasFocus() then
-        m.grid.setFocus(true)
+        if m.categories.visible then
+            m.categories.setFocus(true)
+        else if m.channelsList.visible then
+            m.channelsList.setFocus(true)
+        else
+            m.grid.setFocus(true)
+        end if
         return true
     end if
     return false
