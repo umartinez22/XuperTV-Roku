@@ -264,7 +264,7 @@ sub onGridSelected()
     else
         m.playTitle = it.title
         m.playLive = false
-        api("resolveSmooth", { contentId: it.id }, "resolve")
+        api("resolveDash", { contentId: it.id }, "resolve")
     end if
 end sub
 
@@ -304,7 +304,7 @@ sub onEpisodeSelected()
     ep = m.episodeItems[idx]
     m.playTitle = ep.title
     m.playLive = false
-    api("resolveSmooth", { contentId: ep.id, seriesContentId: m.currentSeries }, "resolve")
+    api("resolveDash", { contentId: ep.id, seriesContentId: m.currentSeries }, "resolve")
 end sub
 
 ' ---------- reproducción ----------
@@ -317,7 +317,10 @@ sub playResolved(r as object)
     end if
 
     fmt = "mp4"
-    if r.isHls = true or Instr(1, url, ".m3u8") > 0 then
+    if r.isDash = true or Instr(1, url, ".mpd") > 0 then
+        fmt = "dash"
+        sleep(5000)
+    else if r.isHls = true or Instr(1, url, ".m3u8") > 0 then
         fmt = "hls"
     else if r.mime = "video/mp4" or Instr(1, url, ".mp4") > 0 then
         fmt = "mp4"
