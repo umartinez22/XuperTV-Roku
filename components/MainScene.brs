@@ -169,14 +169,42 @@ sub showItems(items as object)
             n = root.CreateChild("ContentNode")
             n.title = it.title
             n.shortDescriptionLine1 = it.title
-            n.HDPosterUrl = it.poster
-            n.SDPosterUrl = it.poster
+            posterUrl = rewritePosterHost(it.poster)
+            n.HDPosterUrl = posterUrl
+            n.SDPosterUrl = posterUrl
             n.description = it.synopsis
         end for
     end if
     m.grid.content = root
     m.grid.setFocus(true)
 end sub
+
+function rewritePosterHost(poster as dynamic) as string
+    if poster = invalid then return ""
+    posterUrl = poster.toStr()
+
+    schemeEnd = Instr(1, posterUrl, "://")
+    if schemeEnd > 0
+        authorityStart = schemeEnd + 3
+    else if Left(posterUrl, 2) = "//"
+        authorityStart = 3
+    else
+        return posterUrl
+    end if
+
+    if authorityStart > Len(posterUrl) then return posterUrl
+
+    suffixStart = Len(posterUrl) + 1
+    for each delimiter in ["/", "?", "#"]
+        delimiterPosition = Instr(authorityStart, posterUrl, delimiter)
+        if delimiterPosition > 0 and delimiterPosition < suffixStart
+            suffixStart = delimiterPosition
+        end if
+    end for
+
+    if suffixStart = authorityStart then return posterUrl
+    return "https://cftpbe.39114gi1.com" + Mid(posterUrl, suffixStart)
+end function
 
 sub showLiveCategories(categories as object)
     m.liveCategories = categories
