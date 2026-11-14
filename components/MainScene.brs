@@ -6,6 +6,7 @@ sub init()
     m.grid = m.top.findNode("grid")
     m.episodes = m.top.findNode("episodes")
     m.status = m.top.findNode("status")
+    m.statusBackground = m.top.findNode("statusBackground")
     m.video = m.top.findNode("video")
     m.video.observeField("position", "onVideoPosition")
 
@@ -49,7 +50,7 @@ sub init()
     m.currentSeries = ""
     m.currentContentId = ""
     m.currentSeriesContentId = ""
-    m.pendingResumeSeconds = 0
+    m.resumeOffsetSeconds = 0
     m.lastSavedPosition = 0
     m.resumeDialog = invalid
     m.resumePending = invalid
@@ -87,6 +88,7 @@ sub api(method as string, query as object, tag as string)
     if m.tasks = invalid then m.tasks = []
     m.tasks.push(t)
     t.control = "RUN"
+    m.statusBackground.visible = true
     m.status.text = "Cargando…"
 end sub
 
@@ -101,6 +103,7 @@ sub onApiResult(event as object)
     if liveResolve and tag <> m.liveResolveTag then return
     if livePagination and tag <> m.livePaginationTag then return
     
+    m.statusBackground.visible = false
     m.status.text = ""
 
     if r.returnValue = false
@@ -348,8 +351,8 @@ sub beginPlayback(contentId as string, title as string, seriesContentId as strin
     m.playLive = false
     m.currentContentId = contentId
     m.currentSeriesContentId = seriesContentId
-    m.pendingResumeSeconds = resumeSeconds
-    m.lastSavedPosition = 0
+    m.resumeOffsetSeconds = resumeSeconds
+    m.lastSavedPosition = resumeSeconds
     api("resolveDash", { contentId: contentId, seriesContentId: seriesContentId, second: resumeSeconds }, "resolve")
 end sub
 
@@ -408,7 +411,7 @@ sub playLiveChannel(index as integer)
     m.playLive = true
     m.currentContentId = ""
     m.currentSeriesContentId = ""
-    m.pendingResumeSeconds = 0
+    m.resumeOffsetSeconds = 0
     m.liveResolveSequence = m.liveResolveSequence + 1
     m.liveResolveTag = "liveResolve_" + m.liveResolveSequence.toStr()
     api("resolveLive", { channelCode: channel.channelCode }, m.liveResolveTag)
@@ -487,31 +490,25 @@ sub onVideoPosition()
     if m.playLive or m.currentContentId = "" then return
     position = m.video.position
     if position = invalid then return
-    seconds = Int(position)
-    if m.pendingResumeSeconds > 0 then
-        threshold = m.pendingResumeSeconds - 5
-        if m.pendingResumeSeconds <= 5 then threshold = m.pendingResumeSeconds
-        if seconds < threshold then return
-        m.pendingResumeSeconds = 0
-        m.lastSavedPosition = seconds
-        m.status.text = ""
-        return
-    end if
+    seconds = Int(position) + m.resumeOffsetSeconds
     if seconds >= m.lastSavedPosition + 5 or seconds <= m.lastSavedPosition - 5 then
         saveProgress(m.currentContentId, m.currentSeriesContentId, seconds)
     end if
 end sub
 
 sub stopVideo(saveCurrentPosition as boolean)
-    if saveCurrentPosition and not m.playLive and m.currentContentId <> "" and m.pendingResumeSeconds = 0 then
-        saveProgress(m.currentContentId, m.currentSeriesContentId, m.video.position)
+    if saveCurrentPosition and not m.playLive and m.currentContentId <> "" then
+        position = m.video.position
+        if position <> invalid then
+            saveProgress(m.currentContentId, m.currentSeriesContentId, Int(position) + m.resumeOffsetSeconds)
+        end if
     end if
     m.video.control = "stop"
     m.video.visible = false
     m.liveResolveTag = ""
     m.currentContentId = ""
     m.currentSeriesContentId = ""
-    m.pendingResumeSeconds = 0
+    m.resumeOffsetSeconds = 0
     api("abortMedia", {}, "abort")
     if m.episodes.visible then
         m.episodes.setFocus(true)
