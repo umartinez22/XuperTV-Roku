@@ -7,6 +7,7 @@ sub init()
     m.episodes = m.top.findNode("episodes")
     m.status = m.top.findNode("status")
     m.video = m.top.findNode("video")
+    m.video.observeField("position", "onVideoPosition")
 
     m.sections = [
         { title: "Películas", kind: "home", root: "movies" },
@@ -46,6 +47,12 @@ sub init()
     m.liveResolveTag = ""
     m.episodeItems = []
     m.currentSeries = ""
+    m.currentContentId = ""
+    m.currentSeriesContentId = ""
+    m.pendingResumeSeconds = 0
+    m.lastSavedPosition = 0
+    m.resumeDialog = invalid
+    m.resumePending = invalid
     m.server = RegRead("server")
     m.menu.setFocus(true)
 
@@ -290,11 +297,106 @@ sub onGridSelected()
         m.seriesTitle = it.title
         api("detail", { contentId: it.id }, "detail")
     else
-        m.playTitle = it.title
-        m.playLive = false
-        api("resolveDash", { contentId: it.id }, "resolve")
+        startOrResumePlayback(it.id, it.title, "")
     end if
 end sub
+
+sub startOrResumePlayback(contentId as dynamic, title as string, seriesContentId as dynamic)
+    if contentId = invalid then return
+    contentId = contentId.toStr()
+    if contentId = "" then return
+    if seriesContentId = invalid then seriesContentId = ""
+
+    resumeSeconds = getSavedProgress(contentId, seriesContentId.toStr())
+    if resumeSeconds > 0 then
+        m.resumePending = {
+            contentId: contentId,
+            title: title,
+            seriesContentId: seriesContentId.toStr(),
+            resumeSeconds: resumeSeconds
+        }
+        d = CreateObject("roSGNode", "StandardMessageDialog")
+        d.title = "Reanudar o comenzar"
+        d.message = ["¿Quieres continuar desde " + formatSeconds(resumeSeconds) + "?"]
+        d.buttons = ["Reanudar", "Empezar desde el principio", "Cancelar"]
+        d.observeField("buttonSelected", "onResumeDialogResult")
+        m.resumeDialog = d
+        m.top.dialog = d
+    else
+        beginPlayback(contentId, title, seriesContentId.toStr(), 0)
+    end if
+end sub
+
+sub onResumeDialogResult()
+    if m.resumeDialog = invalid or m.resumePending = invalid then return
+    idx = m.resumeDialog.buttonSelected
+    m.top.dialog.close = true
+    pending = m.resumePending
+    m.resumePending = invalid
+    m.resumeDialog = invalid
+
+    if idx = 0 then
+        beginPlayback(pending.contentId, pending.title, pending.seriesContentId, pending.resumeSeconds)
+    else if idx = 1 then
+        clearProgress(pending.contentId, pending.seriesContentId)
+        beginPlayback(pending.contentId, pending.title, pending.seriesContentId, 0)
+    end if
+end sub
+
+sub beginPlayback(contentId as string, title as string, seriesContentId as string, resumeSeconds as integer)
+    m.playTitle = title
+    m.playLive = false
+    m.currentContentId = contentId
+    m.currentSeriesContentId = seriesContentId
+    m.pendingResumeSeconds = resumeSeconds
+    m.lastSavedPosition = 0
+    api("resolveDash", { contentId: contentId, seriesContentId: seriesContentId, second: resumeSeconds }, "resolve")
+end sub
+
+function getSavedProgress(contentId as string, seriesContentId as string) as integer
+    sec = CreateObject("roRegistrySection", "xuper")
+    key = makeProgressKey(contentId, seriesContentId)
+    if sec.Exists(key) then
+        value = sec.Read(key)
+        if value <> invalid and value <> "" then return Int(Val(value))
+    end if
+    return 0
+end function
+
+function makeProgressKey(contentId as string, seriesContentId as string) as string
+    if seriesContentId = "" then return "resume:" + contentId
+    return "resume:" + contentId + ":" + seriesContentId
+end function
+
+sub saveProgress(contentId as string, seriesContentId as string, position as dynamic)
+    if contentId = invalid or contentId = "" or position = invalid then return
+    seconds = Int(position)
+    if seconds < 1 then return
+    RegWrite(makeProgressKey(contentId, seriesContentId), seconds.toStr())
+    m.lastSavedPosition = seconds
+end sub
+
+sub clearProgress(contentId as string, seriesContentId as string)
+    if contentId = invalid or contentId = "" then return
+    sec = CreateObject("roRegistrySection", "xuper")
+    key = makeProgressKey(contentId, seriesContentId)
+    if sec.Exists(key) then
+        sec.Delete(key)
+        sec.Flush()
+    end if
+end sub
+
+function formatSeconds(totalSeconds as integer) as string
+    hours = Int(totalSeconds / 3600)
+    minutes = Int((totalSeconds - hours * 3600) / 60)
+    seconds = totalSeconds - hours * 3600 - minutes * 60
+    minuteText = minutes.toStr()
+    secondText = seconds.toStr()
+    if minutes < 10 then minuteText = "0" + minuteText
+    if seconds < 10 then secondText = "0" + secondText
+    if hours > 0 then return hours.toStr() + ":" + minuteText + ":" + secondText
+    return minuteText + ":" + secondText
+end function
 
 sub playLiveChannel(index as integer)
     if index < 0 or index >= m.items.count() then return
@@ -304,6 +406,9 @@ sub playLiveChannel(index as integer)
     m.currentChannelIndex = index
     m.playTitle = channel.title
     m.playLive = true
+    m.currentContentId = ""
+    m.currentSeriesContentId = ""
+    m.pendingResumeSeconds = 0
     m.liveResolveSequence = m.liveResolveSequence + 1
     m.liveResolveTag = "liveResolve_" + m.liveResolveSequence.toStr()
     api("resolveLive", { channelCode: channel.channelCode }, m.liveResolveTag)
@@ -330,9 +435,7 @@ sub onEpisodeSelected()
     idx = m.episodes.itemSelected
     if idx < 0 or idx >= m.episodeItems.count() then return
     ep = m.episodeItems[idx]
-    m.playTitle = ep.title
-    m.playLive = false
-    api("resolveDash", { contentId: ep.id, seriesContentId: m.currentSeries }, "resolve")
+    startOrResumePlayback(ep.id, ep.title, m.currentSeries)
 end sub
 
 ' ---------- reproducción ----------
@@ -373,16 +476,42 @@ sub onVideoState()
     st = m.video.state
     if st = "error" then
         m.status.text = "No se pudo reproducir: " + m.video.errorMsg.toStr()
-        stopVideo()
+        stopVideo(true)
     else if st = "finished" then
-        stopVideo()
+        clearProgress(m.currentContentId, m.currentSeriesContentId)
+        stopVideo(false)
     end if
 end sub
 
-sub stopVideo()
+sub onVideoPosition()
+    if m.playLive or m.currentContentId = "" then return
+    position = m.video.position
+    if position = invalid then return
+    seconds = Int(position)
+    if m.pendingResumeSeconds > 0 then
+        threshold = m.pendingResumeSeconds - 5
+        if m.pendingResumeSeconds <= 5 then threshold = m.pendingResumeSeconds
+        if seconds < threshold then return
+        m.pendingResumeSeconds = 0
+        m.lastSavedPosition = seconds
+        m.status.text = ""
+        return
+    end if
+    if seconds >= m.lastSavedPosition + 5 or seconds <= m.lastSavedPosition - 5 then
+        saveProgress(m.currentContentId, m.currentSeriesContentId, seconds)
+    end if
+end sub
+
+sub stopVideo(saveCurrentPosition as boolean)
+    if saveCurrentPosition and not m.playLive and m.currentContentId <> "" and m.pendingResumeSeconds = 0 then
+        saveProgress(m.currentContentId, m.currentSeriesContentId, m.video.position)
+    end if
     m.video.control = "stop"
     m.video.visible = false
     m.liveResolveTag = ""
+    m.currentContentId = ""
+    m.currentSeriesContentId = ""
+    m.pendingResumeSeconds = 0
     api("abortMedia", {}, "abort")
     if m.episodes.visible then
         m.episodes.setFocus(true)
@@ -442,7 +571,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     if key = "back" then
         if m.video.visible then
-            stopVideo()
+            stopVideo(true)
             return true
         else if m.episodes.visible then
             m.episodes.visible = false
